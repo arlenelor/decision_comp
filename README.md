@@ -1,2 +1,2 @@
-# agency
-Content for agency project. 
+# decision comp
+Content for the decision competition project. 
