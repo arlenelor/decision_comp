@@ -1,0 +1,210 @@
+---
+title: "01_mad_trajectories.Rmd"
+author: "Arlene L."
+date: "2025-10-17"
+output: html_document
+---
+
+### Description: In this script, we will 1) visualize raw trajectories, 2) compare maximnum absolute deviation (MAD) across conditions and 3) visualize differences in MAD across conditions.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load in packages
+library(here) 
+library(tidyverse)
+library(mousetrap)
+library(ggplot2)
+library(ggbeeswarm)
+```
+
+# Set up directories
+```{r}
+rootPath <- dirname(dirname(dirname(dirname(dirname(here::here())))))
+dataPath <- file.path(rootPath, 'data/v3/pilot3')
+derivPath <- file.path(dataPath, 'derivatives')
+
+cat(rootPath)
+
+# Import the included subjects accordingly 
+sub_map <- read.csv(file.path(dataPath, 'sub_mapping.csv'))
+sub_map <- sub_map %>% filter(!str_detect(reason, 'direct assoc')) %>% filter(!str_detect(reason, 'demograp'))
+# sub_map <- subset(sub_map, excluded != 'yes')
+cat('\nNumber of subs:', length(sub_map$sub_label))
+
+# Establish plot colors 
+cond_colors <- c('#FFD93D', '#762E84')
+cond_colors_interact <- c('#FFD93D', '#FFD93D', '#762E84', '#762E84')
+```
+
+
+# Obtain mouse data for selected participants
+```{r}
+# Prepare dataframe for everyone's data... 
+mouse_enc_all <- data.frame()
+
+for (s in sub_map$sub_label){
+  curr_mouse <- read.csv(Sys.glob(file.path(derivPath, s, '*enc_mt_formattedData*')))
+  mouse_enc_all<- rbind(mouse_enc_all, curr_mouse)}
+
+# Reset the indices for the mouse_enc_all dataframe 
+rownames(mouse_enc_all) <- NULL
+```
+
+```{r}
+# For each subject... 
+for (s in unique(mouse_enc_all$sub_label)){
+  # Deal with current subject 
+  sub_mouse_enc <- subset(mouse_enc_all, sub_label == s)
+  
+  # For each unique object, start naming objects 
+  for (obj in unique(sub_mouse_enc$stimulus_name)){
+    # Deal with the current object...
+    curr_obj <- subset(sub_mouse_enc, stimulus_name == obj)
+    
+    # Sort by trial JUST in case
+    curr_obj <- curr_obj[order(curr_obj$Trial.Number),]
+    mouse_enc_all[rownames(curr_obj)[1], 'pairmate_num'] <- 'first'
+    
+    if (nrow(curr_obj) == 2){mouse_enc_all[rownames(curr_obj)[2], 'pairmate_num'] <- 'second'}}}
+
+# Then, create a column that combines the pairmate number and condition...
+mouse_enc_all$cond_pairmate <- paste(mouse_enc_all$condition, mouse_enc_all$pairmate_num, sep='-')
+```
+
+```{r}
+# Only take the paired information for now
+enc_mouse_paired <- subset(mouse_enc_all, paired_status=='paired')
+
+# Also, take the trials in which both pairmates were correct
+enc_mouse_paired <- enc_mouse_paired %>% subset(both_enc_acc == 1)
+
+# Factor our pairmate column into the order we want it to be
+enc_mouse_paired$cond_pairmate <- factor(enc_mouse_paired$cond_pairmate, c('unique-first', 'unique-second', 'competing-first', 'competing-second'))
+
+#### For some reason, subject 12 has mouse data that wasn't recorded for like... 6 trials. So we will exclude these trials for now.... 
+#### Will determine based on direct association if other 10 subs should be re-included in 
+enc_mouse_paired <- subset(enc_mouse_paired, x_pos != '')
+```
+
+# Convert data into mousetrap obj
+```{r}
+mt_obj <- mt_import_mousetrap(enc_mouse_paired, xpos_label='x_pos', ypos_label='y_pos', timestamps_label='time_trajectories', mt_id_label=NULL, split=' ', duplicates='remove_first', unordered='warn',reset_timestamps=T, digits=NULL, verbose=F)
+
+# Obtain the mt measures
+mt_analyzed <- mt_measures(mt_obj)
+
+# Remove trajectories with no variance
+mt_analyzed$data$pos_var <- apply(mt_analyzed$trajectories[,,"xpos"],1,var,na.rm=TRUE) + apply(mt_analyzed$trajectories[,,"ypos"],1,var,na.rm=TRUE)
+table(mt_analyzed$data$pos_var==0) # view how many datapoints have a variance of 0
+mt_analyzed <- mt_subset(mt_analyzed, pos_var>0)
+
+# Time normalize the trajectories
+mt_analyzed = mt_time_normalize(mt_analyzed)
+
+# Merge the measures with the actual data 
+mt_measures_data <- mt_analyzed$data %>% left_join(mt_analyzed$measures, by='mt_id')
+```
+
+# Visualise the data (highest vs. lowest MAD for competing trajectories...)
+```{r}
+# Make copy of analyzed that we will use for plot
+mt_analyzed_plot <- mt_analyzed
+mt_comp <- subset(mt_measures_data, condition == 'competing')
+
+# Get the highest values 
+mad_highest <- mt_comp %>% arrange(desc(MAD))
+mad_highest <- head(mad_highest, 50)
+
+# Get the lowest values
+mad_lowest <- mt_comp %>% arrange(MAD)
+mad_lowest <- head(mad_lowest, 50)
+
+# Mark certain trajectories as included in our dataframe 
+for (h in mad_highest$mt_id){
+  mt_analyzed_plot$data[h,'plot_mark'] <- 'high'}
+
+for (l in mad_lowest$mt_id){
+  mt_analyzed_plot$data[l,'plot_mark'] <- 'low'}
+
+# Then, subset data accordingly 
+high_mt <- mt_subset(mt_analyzed_plot, plot_mark == 'high')
+low_mt <- mt_subset(mt_analyzed_plot, plot_mark == 'low')
+
+high_mt_plot <- mt_plot(high_mt, use="tn_trajectories", color='plot_mark') + ylab('Y Position') + xlab('X Position') + theme_minimal() + scale_colour_manual('plot_mark', labels = c("High MAD\n(Competing)"), values=c('#59206D'))
+
+low_mt_plot <- mt_plot(low_mt, use="tn_trajectories", color='plot_mark') + ylab('Y Position') + xlab('X Position') + theme_minimal() + scale_colour_manual('plot_mark', labels = c("Low MAD\n(Competing)"), values=c('#59206D'))
+```
+
+
+```{r}
+# Make copy of analyzed that we will use for plot
+mt_analyzed_plot <- mt_analyzed
+
+# Also, just plot a subset of the unique condition... 
+mt_uni <- subset(mt_measures_data, condition == 'unique')
+
+# Get the lowest values
+mad_lowest <- mt_uni %>% arrange(MAD)
+mad_lowest <- head(mad_lowest, 50)
+
+# Mark certain trajectories as included in our dataframe 
+for (l in mad_lowest$mt_id){
+  mt_analyzed_plot$data[l,'plot_mark'] <- 'low'}
+
+low_mt <- mt_subset(mt_analyzed_plot, plot_mark == 'low')
+low_mt_plot <- mt_plot(low_mt, use="tn_trajectories", color='plot_mark') + ylab('Y Position') + xlab('X Position') + theme_minimal() + scale_colour_manual('plot_mark', labels = c("Low MAD\n(Unique)"), values=c('#FFD93D'))
+```
+
+```{r}
+# Just get sample trajectories (by random, sort of)
+mt_analyzed_plot <- mt_analyzed
+mt_comp <- subset(mt_measures_data, condition == 'competing' & pairmate_num == 'second')
+
+# Shuffle the rows 
+set.seed(789)
+random_mad_comp <- mt_comp %>% slice_sample(n = 25) # get 50 shuffled rows
+
+# Mark certain trajectories as included in our dataframe
+for (r1 in random_mad_comp$mt_id){
+  mt_analyzed_plot$data[r1,'plot_mark'] <- 'sample'}
+
+rand_traj_comp <- mt_subset(mt_analyzed_plot, plot_mark == 'sample')
+rand_traj_comp_plot <- mt_plot(rand_traj_comp, use="tn_trajectories", color='plot_mark') +  ylab('Y Coordinate (Normalized)') + xlab('X Coordinate (Normalized)') + theme_minimal() + scale_colour_manual('plot_mark', labels = c("25 Sample Trajectories\n(Competing)"), values=c('#59206D')) + xlim(0, 1) + ylim(0, .85) + theme(plot.title = element_text(family = "Avenir"), legend.position = "none") + ggtitle("Competing goal")
+rand_traj_comp_plot
+```
+
+```{r}
+# Just get sample trajectories (by random, sort of)
+mt_analyzed_plot <- mt_analyzed
+mt_uni <- subset(mt_measures_data, condition == 'unique' & pairmate_num == 'second')
+
+# Shuffle the rows 
+# set.seed(40)
+random_mad_uni <- mt_uni %>% slice_sample(n = 25) # get 50 shuffled rows
+
+# Mark certain trajectories as included in our dataframe
+for (r2 in random_mad_uni$mt_id){
+  mt_analyzed_plot$data[r2,'plot_mark'] <- 'sample'}
+
+rand_traj_uni <- mt_subset(mt_analyzed_plot, plot_mark == 'sample')
+rand_traj_uni_plot <- mt_plot(rand_traj_uni, use="tn_trajectories", color='plot_mark') + ylab('Y Coordinate (Normalized)') + xlab('X Coordinate (Normalized)') + theme_minimal() + scale_colour_manual(values=c('#FFD93D')) + xlim(0, 1) + ylim(0, .85) + theme(plot.title = element_text(family = "Avenir"), legend.position = "none") + ggtitle("Unique goal")
+rand_traj_uni_plot
+```
+
+```{r}
+# Use cowplot to plot these next to each other
+title_plot <- ggdraw() +
+  draw_label("25 Sample Trajectories",
+             size = 18,
+             fontface = "bold", fontfamily = 'avenir',
+             x = 0,
+             hjust = -0.05)
+gridded_plot <- cowplot::plot_grid(rand_traj_uni_plot, rand_traj_comp_plot, ncol = 2, labels = c("A", "B"))
+gridded_plot
+
+cowplot::plot_grid(title_plot, gridded_plot, ncol = 1, rel_heights = c(0.5, 5, 10))
+```
+
