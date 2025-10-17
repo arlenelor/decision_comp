@@ -1,0 +1,79 @@
+---
+title: "01_filter_mem_acc.Rmd"
+author: "Arlene L."
+date: "2025-07-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load in packages
+library(here) 
+library(tidyverse)
+```
+
+```{r}
+# Establish directory
+data_path <- file.path(here::here(), 'data/raw/raw_acc')
+proc_data_path <- file.path(here::here(), 'data/processed/acc')
+
+# Get all of the directories from the data folder 
+sub_files <- Sys.glob(file.path(data_path, 'sub*temp*.csv'))
+```
+
+```{r}
+# Target dataframe
+temp_num_master <- data.frame()
+
+for (s in sub_files){
+      temp_file <- read.csv(s)
+      
+      # Extract necessary columns and rows (to extract responses)
+      temp_file <- subset(temp_file, Display == 'temp_dist_trial' & Response.Type == 'response')
+      temp_file <- temp_file %>% select(c(sub_label, Screen, Response, Spreadsheet..stimulus_path, Reaction.Time))
+      colnames(temp_file) <- c('sub', 'Screen', 'temp_dist_resp', 'image_file_stim1', 'temp_rt') # rename columns
+      
+      # Import responses from the decision phase (encoding)
+      enc_behav <- read.csv(Sys.glob(file.path(data_path, temp_file$sub[1], '*enc_afc*.csv')))
+      enc_behav <- enc_behav %>% select(c('sub', 'image_file_stim1', 'pair_dist', 'within_block_dist', 'paired_status', 'condition', 'acc'))
+
+      # Extract item frequency (memory) metrics
+      temp_num_file <- subset(temp_file, Screen == 'num_items')
+
+      # Merge decision phase data with item frequency responses
+      enc_num_df <- left_join(enc_behav, temp_num_file, by = "image_file_stim1")
+
+      # Extract only the pairs that people sorted correctly during the decision phase
+      enc_num_df <- subset(enc_num_df, acc == 1)
+      
+      # Next, score the item frequency responses based on the decision phase
+      for (r in rownames(enc_num_df)){
+        # If the item was paired during the decision phase... 
+        if (enc_num_df[r, 'paired_status'] == 'paired'){
+          # If participant answered 2 items correctly...
+          if (enc_num_df[r, 'temp_dist_resp'] == '2_ITEM') {enc_num_df[r, 'temp_acc'] <- 1}
+          else {enc_num_df[r, 'temp_acc'] <- 0}}
+        
+        # If the item was not paired during the decision phase... 
+        else {
+          # If the participant answered 1 item correctly...
+          if (enc_num_df[r, 'temp_dist_resp'] == '1_ITEM') {enc_num_df[r, 'temp_acc'] <- 1}
+          else {enc_num_df[r, 'temp_acc'] <- 0}}}
+
+      # Clean up the decision phase dataframe (remove unnecessary columns, rename columns)
+      enc_num_df <- enc_num_df %>% select(-c(Screen, sub.y))
+      colnames(enc_num_df) <- c('sub', 'image_file_stim1', 'pair_dist', 'within_block_dist', 'paired_status',
+                                'condition', 'acc', 'temp_dist_resp', 'temp_rt', 'temp_acc')
+      temp_num_master <- rbind(temp_num_master, enc_num_df) # bind decision phase data with the item frequency (memory) data 
+
+      # Also, save our temporal item number accuracy file
+      enc_num_save_df <- enc_num_df
+      enc_num_save_df$image_stem <- str_replace_all(enc_num_save_df$image_file_stim1, "_1.jpg", "") # save image code only
+      fn = sprintf('%s_temporal_item_num_acc.csv', temp_file$sub[1]) # make sure filename starts with subject label
+      write.csv(enc_num_save_df, file.path(proc_data_path, temp_file$sub[1], fn), row.names=F)
+
+  }
+```
