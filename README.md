@@ -12,4 +12,4 @@ In everyday life, we are constantly faced with conflicting choices. Although som
 
 + /notebooks/analyses: Consists of scripts used to analyze data.
 
-+ + /notebooks/analyses: Includes analysis visualizations.
++ /notebooks/analyses: Includes analysis visualizations.
