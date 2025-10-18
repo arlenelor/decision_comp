@@ -19,6 +19,7 @@ library(mousetrap) # for processing mouse trajectories
 library(ggplot2)
 library(ggbeeswarm)
 library(cowplot) # for grouped plots
+library(lmerTest) # for lm/lmer p values
 ```
 
 # Set up directories
@@ -103,7 +104,7 @@ mt_analyzed = mt_time_normalize(mt_analyzed)
 mt_measures_data <- mt_analyzed$data %>% left_join(mt_analyzed$measures, by='mt_id')
 ```
 
-# Visualize the data by viewing 50 sample trajectories from each condition
+#1: Visualize the data by viewing 50 sample trajectories from each condition
 ```{r}
 # Define normalized x and y coords for decision phase components
 x_coord_stim <- .5; y_coord_stim <- .8
@@ -171,5 +172,64 @@ gridded_plot_final <- ggdraw(add_sub(gridded_plot_title, "In the sample trajecto
 visualize_dir <- file.path(rootPath, 'visualizations')
 if (!dir.exists(visualize_dir)) {dir.create(visualize_dir)} # create folder if it doesn't exist yet...
 ggsave(file.path(visualize_dir, "01_sample_trajectories.png"), plot = gridded_plot_final, width = 30, height = 20, units = "cm", dpi = 300, bg = "white")
+```
+
+#2: Compare MAD (maximum absolute deviation) across goal conditions and pairmates (using a linear regression)
+```{r}
+# First, put our goal + pairmate conditions in preferred order
+mt_measures_data$condition <- factor(mt_measures_data$condition, c('unique', 'competing'))
+mt_measures_data$pairmate_num <- factor(mt_measures_data$pairmate_num, c('first', 'second'))
+
+# Check whether there is a difference in MAD between conditions 
+mad_mod <- lm(MAD ~ condition, data=mt_measures_data)
+summary(mad_mod)
+
+# Check whether there is a difference in MAD between conditions + pairmates
+mad_mod_pair <- lm(MAD ~ condition * pairmate_num, data=mt_measures_data)
+summary(mad_mod_pair)
+```
+
+# Plot MAD by goal and pairmate 
+```{r}
+# Establish condition colors for 2x2 plot
+cond_colors_interact <- c('#FFD93D', '#FFD93D', '#762E84', '#762E84')
+```
+
+
+```{r}
+library(grid)
+# Get subject-level MAD averages by condition and pairmate
+mad_pair_avg <- mt_measures_data %>% dplyr::group_by(sub_label, condition, pairmate_num) %>% dplyr::summarise(mean_mad = mean(MAD))
+
+# Set up dataframe for plotting
+mad_pair_avg$condition <- factor(mad_pair_avg$condition, c('unique', 'competing'))
+mad_pair_avg$cond_pair <- paste(mad_pair_avg$condition, mad_pair_avg$pairmate_num, sep='-') # create new column that combines condition (for plotting)
+mad_pair_avg$cond_pair <- factor(mad_pair_avg$cond_pair, c('unique-first', 'unique-second', 'competing-first', 'competing-second'))
+renamed_plot_cols <- c('first' = 'First Pairmate', 'second' = 'Second Pairmate')
+
+# Set up text object
+ann_text <- data.frame(mpg = 15,wt = 5,lab = "Text",
+                       cyl = factor(8,levels = c("4","6","8")))
+
+mad_pair_plot <- ggplot(mad_pair_avg,aes(x=cond_pair, y=mean_mad, fill=cond_pair)) +
+              geom_bar(alpha=.9, stat='summary') +
+              ylab('Maximum Absolute Deviation (MAD)') + xlab('\nCondition') +
+              theme_classic() + theme(legend.position="none") +
+              scale_fill_manual(values=cond_colors_interact) +
+              facet_wrap(~pairmate_num, scales = 'free_x', labeller = labeller(pairmate_num = renamed_plot_cols)) +
+              geom_beeswarm(size=3, alpha=0.6, color='black', method = "swarm", position=position_dodge(.7), priority='density', cex = 2) +
+              theme(axis.title.x = element_text(size=17), axis.text.x  = element_text(vjust=0.5, size=10, color="black")) +
+              theme(axis.title.y = element_text(size=17), axis.text.y  = element_text(vjust=0.5, size=15, color="black")) +
+              scale_x_discrete(labels=c('Unique', 'Competing')) 
+
+# Create plot with interaction significance symbol
+mad_pair_sig_plot <- ggdraw(mad_pair_plot) + draw_text("\u25CB", x = 0.54, y = 0.88, size=50) + draw_text("×", x = 0.539, y = 0.88, size=33) + draw_text("***", x = 0.565, y = 0.89, size=16)
+
+mad_pair_final_plot <- ggdraw(add_sub(mad_pair_sig_plot, "A significant Goal x Pairmate interaction revealed diverging patterns:\nmousetracking trajectories were associated with increasing attraction to the\nprevious choice when memory is involved (Competing) but decreases for choices\nthat are memory-independent (Unique).", size=12, fontfamily='avenir', fontface='italic'))
+
+# Save visualization in png format
+visualize_dir <- file.path(rootPath, 'visualizations')
+if (!dir.exists(visualize_dir)) {dir.create(visualize_dir)} # create folder if it doesn't exist yet...
+ggsave(file.path(visualize_dir, "02_mad_across_conditions.png"), plot = mad_pair_final_plot, width = 25, height = 20, units = "cm", dpi = 300, bg = "white")
 ```
 
