@@ -11,3 +11,5 @@ In everyday life, we are constantly faced with conflicting choices. Although som
 + /notebooks/preprocessing: Contains scripts used to process mousetracking and memory test responses. Mousetracking trajectories were resampled to 20 ms intervals and interpolated to handle missing points when the mouse was stationary. Additionally, trajectoties were time normalized to allow for trial-by-trial comparison. Trials on the memory test were filtered to include correct decisions (in accordance with task instructions). 
 
 + /notebooks/analyses: Consists of scripts used to analyze data.
+
++ + /notebooks/analyses: Includes analysis visualizations.
