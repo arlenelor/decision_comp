@@ -1,0 +1,231 @@
+---
+title: "02_mem_accuracy.rmd"
+author: "Arlene L."
+date: "2025-10-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load in packages
+library(here) 
+library(tidyverse)
+library(mousetrap) # for processing mouse trajectories
+library(ggplot2)
+library(ggbeeswarm)
+library(cowplot) # for grouped plots
+library(lmerTest) # for lm/lmer p values
+library(sjPlot)
+```
+
+### Description: In this script, we will 1) plot the memory accuracy (i.e., item frequency) across conditions, 2) relate memory accuracy to mousetracking measures (i.e., MAD) from the decision phase and 
+
+
+# Set up directories
+```{r}
+rootPath <- here::here()
+dataPath <- file.path(rootPath, 'data/processed/trajectories')
+mem_dataPath <- file.path(rootPath, 'data/processed/acc')
+
+# Get subject files (for mousetracking trajectoties)
+sub_files <- list.files(dataPath, full.names = T, recursive = T)
+
+# Also, get subject files (for memory accuracy) 
+sub_mem_files <- list.files(mem_dataPath, full.names = T, recursive = T)
+
+# Establish plot colors 
+uni_color <- c('#FFD93D'); comp_color <- c('#762E84')
+```
+
+
+# Obtain mouse data for selected participants
+```{r}
+# Prepare dataframe for everyone's data... 
+mouse_enc_all <- data.frame()
+
+for (s in sub_files){
+  curr_mouse <- read.csv(s)
+  mouse_enc_all<- rbind(mouse_enc_all, curr_mouse)}
+
+# Reset the indices for the mouse_enc_all dataframe 
+rownames(mouse_enc_all) <- NULL
+```
+
+```{r}
+# For each subject... 
+for (s in unique(mouse_enc_all$sub_label)){
+  
+  # Deal with current subject 
+  sub_mouse_enc <- subset(mouse_enc_all, sub_label == s)
+  
+  # For each unique object, start naming objects 
+  for (obj in unique(sub_mouse_enc$stimulus_name)){
+    
+    # Deal with the current object...
+    curr_obj <- subset(sub_mouse_enc, stimulus_name == obj)
+    
+    # Sort by trial (+ assign pairmate labels)
+    curr_obj <- curr_obj[order(curr_obj$Trial.Number),]
+    mouse_enc_all[rownames(curr_obj)[1], 'pairmate_num'] <- 'first'
+    
+    if (nrow(curr_obj) == 2){mouse_enc_all[rownames(curr_obj)[2], 'pairmate_num'] <- 'second'}}}
+
+# Then, create a column that combines the pairmate number and condition...
+mouse_enc_all$cond_pairmate <- paste(mouse_enc_all$condition, mouse_enc_all$pairmate_num, sep='-')
+```
+
+```{r}
+# Only take the paired information for now
+enc_mouse_paired <- subset(mouse_enc_all, paired_status=='paired')
+
+# Also, take the trials in which both pairmates were correct
+enc_mouse_paired <- enc_mouse_paired %>% subset(both_enc_acc == 1)
+
+# Factor our pairmate column into the order we want it to be
+enc_mouse_paired$cond_pairmate <- factor(enc_mouse_paired$cond_pairmate, c('unique-first', 'unique-second', 'competing-first', 'competing-second'))
+
+#### Exclude trials that do not have any mouse coordinates
+enc_mouse_paired <- subset(enc_mouse_paired, x_pos != '')
+```
+
+# Convert data into mousetrap obj
+```{r}
+mt_obj <- mt_import_mousetrap(enc_mouse_paired, xpos_label='x_pos', ypos_label='y_pos', timestamps_label='time_trajectories', mt_id_label=NULL, split=' ', duplicates='remove_first', unordered='warn',reset_timestamps=T, digits=NULL, verbose=F)
+
+# Obtain the mt measures
+mt_analyzed <- mt_measures(mt_obj)
+
+# Remove trajectories with no variance
+mt_analyzed$data$pos_var <- apply(mt_analyzed$trajectories[,,"xpos"],1,var,na.rm=TRUE) + apply(mt_analyzed$trajectories[,,"ypos"],1,var,na.rm=TRUE)
+table(mt_analyzed$data$pos_var==0) # view how many datapoints have a variance of 0
+mt_analyzed <- mt_subset(mt_analyzed, pos_var>0)
+
+# Time normalize the trajectories
+mt_analyzed = mt_time_normalize(mt_analyzed)
+
+# Merge the measures with the actual data 
+mt_measures_data <- mt_analyzed$data %>% left_join(mt_analyzed$measures, by='mt_id')
+```
+
+# Import the temporal memory accuracy data
+```{r}
+temp_num_all <- data.frame()
+
+# Load in all of the temporal number data across all subs
+for (s in sub_mem_files){
+  # Import temporal memory for this sub
+  temp_data <- read.csv(s)
+  temp_data <- subset(temp_data, paired_status == 'paired')
+  
+  # Change the column name
+  temp_data <- temp_data %>% dplyr::rename(sub_label = sub)
+  temp_data_df <- temp_data %>% select(c('sub_label', 'temp_acc', 'image_stem'))
+  temp_num_all <- rbind(temp_num_all, temp_data_df)}
+
+# Extract second pairmates only (in line with main hypothesis)
+mt_measures_p2_num <- subset(mt_measures_data, pairmate_num == 'second')
+
+# Join mousetracking data with memory accuracy
+mt_measures_p2_num$image_stem <- str_replace(mt_measures_p2_num$stimulus_path, '_1.jpg', '')
+mt_measures_p2_num$image_stem <- str_replace(mt_measures_p2_num$image_stem, '_2.jpg', '')
+mt_measures_p2_num <- mt_measures_p2_num %>% left_join(temp_num_all, by=c('sub_label', 'image_stem'))
+```
+
+# Run a mixed-effects logistic regression
+```{r, warning=FALSE}
+# Mean-center the IVs
+mt_measures_p2_num<-scale_within(mt_measures_p2_num, variables = c("MAD", "AUC", "AD"), within = c('sub_label'), prefix = "center.", center = T, scale = F) 
+
+# Place conditions in order
+mt_measures_p2_num$condition <- factor(mt_measures_p2_num$condition, c('unique', 'competing'))
+
+# Run model (w/ random slopes for MAD)
+mad_num_mod <- glmer(temp_acc ~ condition * center.MAD + (center.MAD|sub_label), data=mt_measures_p2_num, family='binomial')
+summary(mad_num_mod)
+
+# Visualize predicted values
+plot_model(mad_num_mod, type='pred', terms=c('center.MAD', 'condition'), colors=c('#FFD93D', '#762E84')) + theme_minimal() + xlab('Maximum Absolute Deviation \n(mean-centered)') + ylab('Number of Items Accuracy') + labs(title='', color='Condition')
+```
+
+# Additionally, visualize the random effects (to get a better understanding of indiv. differences)
+```{r}
+# Split subjects into accuracy groups
+sub_acc_all <- mt_measures_p2_num %>% dplyr::group_by(sub_label, condition) %>% dplyr::summarise(mean_mem_acc = mean(temp_acc))
+sub_acc_comp <- subset(sub_acc_all, condition == 'competing')
+
+# Here, we split the subjects into terciles based on accuracy
+sub_acc_comp <- sub_acc_comp %>% dplyr::mutate(acc_group = case_when(mean_mem_acc < quantile(sub_acc_all$mean_mem_acc, .33) ~ 'Low', mean_mem_acc < quantile(sub_acc_all$mean_mem_acc, .67) ~ 'Medium', .default = 'High'))
+
+```
+
+
+
+```{r}
+# Get random effects (intercept + MAD)
+rand_effects <- ranef(mad_num_mod)$sub_label
+rand_effects$sub_label <- rownames(rand_effects) # create column of sub labels 
+colnames(rand_effects) <- c('random_intercept', 'random_slope_mad', 'sub_label')
+
+# Get conf intervals (using se)
+cond_var <- ranef(mad_num_mod, condVar = TRUE)
+se_slope <- sqrt(attr(cond_var$sub_label, "postVar")[2, 2, ]); rand_effects$se_slope <- se_slope
+rand_effects$lower <- rand_effects$random_slope_mad - 1.96 * se_slope
+rand_effects$upper <- rand_effects$random_slope_mad + 1.96 * se_slope
+
+# Set up the MAD range for values 
+mad_range <- c(min(mt_measures_p2_num$center.MAD), max(mt_measures_p2_num$center.MAD))
+
+# Gather predictions at levels of MAD
+pred_data <- expand.grid(sub_label = unique(mt_measures_p2_num$sub_label), 
+                         condition = unique(mt_measures_p2_num$condition), center.MAD = mad_range)
+pred_data$predicted_prob <- predict(mad_num_mod, pred_data, type = "response")
+
+# Get random slopes for each condition
+sub_slopes <- pred_data %>% dplyr::group_by(sub_label, condition) %>% dplyr::summarise(slope = diff(predicted_prob)/diff(center.MAD), .groups = 'drop')
+
+# Add in the accuracy groupings 
+sub_slopes <- sub_slopes %>% left_join(sub_acc_comp, by=c('sub_label'))
+sub_slopes <- sub_slopes %>% select(-c('condition.y', 'mean_mem_acc'))
+colnames(sub_slopes) <- c('sub_label', 'condition', 'slope', 'acc_group')
+
+# Sort subs by average slope 
+sub_order <- sub_slopes %>% dplyr::group_by(sub_label) %>% dplyr::summarise(mean_slope = mean(slope)) %>% dplyr::arrange(mean_slope)
+sub_slopes <- sub_slopes %>% mutate(sub_label = factor(sub_label, levels = sub_order$sub_label)) # order by factorizing
+
+# Place accuracy in in order
+sub_slopes$acc_group <- factor(sub_slopes$acc_group, c('Low', 'Medium', 'High'))
+
+ggplot(sub_slopes, aes(x = condition, y = slope, group = sub_label, color = acc_group)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", linewidth = 1) +
+  geom_line(alpha = 0.4, linewidth = 0.8) +
+  geom_point(size = 3, alpha = 0.8) +
+  scale_color_manual(
+    values = c("Low" = "#d62728", "Medium" = "#ff7f0e", "High" = "#2ca02c"),
+    name = "Accuracy Group"
+  ) +
+  scale_x_discrete(expand = expansion(add = c(0.2, 0.2))) +
+  labs(
+    x = "Condition",
+    y = "Subject-specific MAD Effect (coefficient)",
+    title = "Individual MAD Effects Across Conditions",
+    subtitle = "Each line = one subject", 
+  ) +
+  theme_minimal(base_size = 13) + theme(text = element_text(family = "avenir"))
+```
+
+# Evaluate model performance using predicted/observed plot 
+```{r}
+
+
+
+
+
+
+
+```
+
+
+
