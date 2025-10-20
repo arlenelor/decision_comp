@@ -9,7 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r, message=FALSE}
+# Suppressing message from here pkg
+
 # Load in packages
 library(here) 
 library(tidyverse)
@@ -21,10 +23,9 @@ library(lmerTest) # for lm/lmer p values
 library(sjPlot)
 ```
 
-### Description: In this script, we will 1) plot the memory accuracy (i.e., item frequency) across conditions, 2) relate memory accuracy to mousetracking measures (i.e., MAD) from the decision phase and 
+Description: In this script, we will 1) plot the memory accuracy (i.e., item frequency) across conditions and 2) relate memory accuracy to mousetracking measures (i.e., MAD) from the decision phase.
 
-
-# Set up directories
+#### Set up directories
 ```{r}
 rootPath <- here::here()
 dataPath <- file.path(rootPath, 'data/processed/trajectories')
@@ -41,7 +42,7 @@ uni_color <- c('#FFD93D'); comp_color <- c('#762E84')
 ```
 
 
-# Obtain mouse data for selected participants
+#### Obtain mouse data for selected participants
 ```{r}
 # Prepare dataframe for everyone's data... 
 mouse_enc_all <- data.frame()
@@ -91,8 +92,9 @@ enc_mouse_paired$cond_pairmate <- factor(enc_mouse_paired$cond_pairmate, c('uniq
 enc_mouse_paired <- subset(enc_mouse_paired, x_pos != '')
 ```
 
-# Convert data into mousetrap obj
+#### Convert data into mousetrap obj
 ```{r}
+# Convert mousetracking trajectories into mousetrap object
 mt_obj <- mt_import_mousetrap(enc_mouse_paired, xpos_label='x_pos', ypos_label='y_pos', timestamps_label='time_trajectories', mt_id_label=NULL, split=' ', duplicates='remove_first', unordered='warn',reset_timestamps=T, digits=NULL, verbose=F)
 
 # Obtain the mt measures
@@ -100,17 +102,19 @@ mt_analyzed <- mt_measures(mt_obj)
 
 # Remove trajectories with no variance
 mt_analyzed$data$pos_var <- apply(mt_analyzed$trajectories[,,"xpos"],1,var,na.rm=TRUE) + apply(mt_analyzed$trajectories[,,"ypos"],1,var,na.rm=TRUE)
-table(mt_analyzed$data$pos_var==0) # view how many datapoints have a variance of 0
 mt_analyzed <- mt_subset(mt_analyzed, pos_var>0)
 
 # Time normalize the trajectories
 mt_analyzed = mt_time_normalize(mt_analyzed)
 
-# Merge the measures with the actual data 
+# Merge the measures with the actual data
 mt_measures_data <- mt_analyzed$data %>% left_join(mt_analyzed$measures, by='mt_id')
+
+# Print the amount of eligible mouse trajectories
+cat('# of eligible mouse trajectories:', nrow(mt_analyzed$data))
 ```
 
-# Import the temporal memory accuracy data
+#### Import the temporal memory accuracy data
 ```{r}
 temp_num_all <- data.frame()
 
@@ -134,8 +138,47 @@ mt_measures_p2_num$image_stem <- str_replace(mt_measures_p2_num$image_stem, '_2.
 mt_measures_p2_num <- mt_measures_p2_num %>% left_join(temp_num_all, by=c('sub_label', 'image_stem'))
 ```
 
-# Run a mixed-effects logistic regression
+```{r}
+# Compare memory accuracy across conditions
+temp_acc_avg <- mt_measures_p2_num %>% select(c(sub_label, condition, temp_acc, image_stem)) %>% 
+                dplyr::group_by(sub_label, condition) %>% dplyr::summarise(avg_acc = mean(temp_acc), .groups = "drop")
+
+temp_acc_ttest <- t.test(subset(temp_acc_avg, condition == 'unique')$avg_acc, subset(temp_acc_avg, condition == 'competing')$avg_acc, paired=T)
+temp_acc_ttest # show results below
+```
+
 ```{r, warning=FALSE}
+# Suppressing warning about avenir font
+
+# Plot difference in memory accuracy
+cond_colors <- c('#FFD93D', '#762E84')
+temp_acc_avg$avg_acc_percent <- temp_acc_avg$avg_acc * 100 # convert accuracy into percent accuracy
+
+# Make sure conditions are in the correct order 
+temp_acc_avg$condition <- factor(temp_acc_avg$condition, c('unique', 'competing'))
+
+# Plot
+temp_acc_plot <- ggplot(temp_acc_avg,aes(x=condition, y=avg_acc_percent, fill=condition)) +
+              geom_bar(alpha=.9, stat='summary', fun.data=mean_se) +
+              ylab('Mean Accuracy for Item Frequency Memory (%)') + xlab('Condition') +
+              theme_classic() + theme(legend.position="none") +
+              scale_fill_manual(values=cond_colors) +
+              geom_beeswarm(size=3, alpha=0.6, color='black', method = "swarm", position=position_dodge(.7), priority='density', cex = 2) +
+              theme(axis.title.x = element_text(size=12), axis.text.x  = element_text(vjust=0.5, size=10, color="black")) +
+              theme(axis.title.y = element_text(size=12), axis.text.y  = element_text(vjust=0.5, size=15, color="black")) +
+              scale_x_discrete(labels=c('Unique', 'Competing')) + 
+              theme(text = element_text(family = "avenir")) + 
+              ylim(0, 105) + 
+              geom_hline(yintercept=50, linetype = 'dashed') # chance line
+
+temp_acc_plot_final <- ggdraw(temp_acc_plot) + draw_text("***", x = 0.53, y = 0.92, size=30) + draw_text("____________", x = 0.53, y = 0.93, size=20)
+temp_acc_plot_final
+```
+
+#### Run a mixed-effects logistic regression (relating MAD to memory accuracy)
+```{r, warning=FALSE}
+# Suppressing warning related to avenir font
+
 # Mean-center the IVs
 mt_measures_p2_num<-scale_within(mt_measures_p2_num, variables = c("MAD", "AUC", "AD"), within = c('sub_label'), prefix = "center.", center = T, scale = F) 
 
@@ -146,11 +189,14 @@ mt_measures_p2_num$condition <- factor(mt_measures_p2_num$condition, c('unique',
 mad_num_mod <- glmer(temp_acc ~ condition * center.MAD + (center.MAD|sub_label), data=mt_measures_p2_num, family='binomial')
 summary(mad_num_mod)
 
-# Visualize predicted values
-plot_model(mad_num_mod, type='pred', terms=c('center.MAD', 'condition'), colors=c('#FFD93D', '#762E84')) + theme_minimal() + xlab('Maximum Absolute Deviation \n(mean-centered)') + ylab('Number of Items Accuracy') + labs(title='', color='Condition')
+# Visualize predicted values/marginal effects
+mad_num_mod_plot <- plot_model(mad_num_mod, type='pred', terms=c('center.MAD[all]', 'condition'), colors=c('#FFD93D', '#762E84')) + theme_minimal() + xlab('Maximum Absolute Deviation \n(mean-centered)') + ylab('Number of Items Accuracy\n') + labs(title='', color='Goal Condition') + theme(text = element_text(family = "avenir"))
+
+mad_num_mod_final_plot <- ggdraw(mad_num_mod_plot) + draw_text("*", x = 0.75, y = 0.83, size=35) + draw_text("ns", x = 0.75, y = 0.48, size=12)
+mad_num_mod_final_plot
 ```
 
-# Additionally, visualize the random effects (to get a better understanding of indiv. differences)
+#### Additionally, visualize the random effects (to get a better understanding of indiv. differences)
 ```{r}
 # Split subjects into accuracy groups
 sub_acc_all <- mt_measures_p2_num %>% dplyr::group_by(sub_label, condition) %>% dplyr::summarise(mean_mem_acc = mean(temp_acc))
@@ -158,12 +204,11 @@ sub_acc_comp <- subset(sub_acc_all, condition == 'competing')
 
 # Here, we split the subjects into terciles based on accuracy
 sub_acc_comp <- sub_acc_comp %>% dplyr::mutate(acc_group = case_when(mean_mem_acc < quantile(sub_acc_all$mean_mem_acc, .33) ~ 'Low', mean_mem_acc < quantile(sub_acc_all$mean_mem_acc, .67) ~ 'Medium', .default = 'High'))
-
 ```
 
+```{r, warning=FALSE}
+# Suppressing warning related to avenir font
 
-
-```{r}
 # Get random effects (intercept + MAD)
 rand_effects <- ranef(mad_num_mod)$sub_label
 rand_effects$sub_label <- rownames(rand_effects) # create column of sub labels 
@@ -198,34 +243,32 @@ sub_slopes <- sub_slopes %>% mutate(sub_label = factor(sub_label, levels = sub_o
 # Place accuracy in in order
 sub_slopes$acc_group <- factor(sub_slopes$acc_group, c('Low', 'Medium', 'High'))
 
-ggplot(sub_slopes, aes(x = condition, y = slope, group = sub_label, color = acc_group)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", linewidth = 1) +
+sub_slopes_plot <- ggplot(sub_slopes, aes(x = condition, y = slope, group = sub_label, color = acc_group)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 1, alpha=.5) +
   geom_line(alpha = 0.4, linewidth = 0.8) +
   geom_point(size = 3, alpha = 0.8) +
   scale_color_manual(
     values = c("Low" = "#d62728", "Medium" = "#ff7f0e", "High" = "#2ca02c"),
-    name = "Accuracy Group"
+    name = "Memory Accuracy\nGroup"
   ) +
-  scale_x_discrete(expand = expansion(add = c(0.2, 0.2))) +
+  scale_x_discrete(expand = expansion(add = c(0.2, 0.2)), labels=c('Unique', 'Competing')) +
   labs(
-    x = "Condition",
-    y = "Subject-specific MAD Effect (coefficient)",
-    title = "Individual MAD Effects Across Conditions",
+    x = "Goal Condition",
+    y = "Subject-specific MAD Effect (slope)",
+    title = "Individual MAD Effects Across Goal Conditions",
     subtitle = "Each line = one subject", 
   ) +
   theme_minimal(base_size = 13) + theme(text = element_text(family = "avenir"))
+
+sub_slopes_final_plot <- ggdraw(add_sub(sub_slopes_plot, "When memory demands are high (Competing condition), individuals with\nweaker memory benefit the most from decision conflict (MAD), suggesting that\ndeliberation between two options helps preserve memories.", size=12, fontfamily='avenir', fontface='italic'))
+sub_slopes_final_plot
+
+# Save visualization in png format
+visualize_dir <- file.path(rootPath, 'visualizations')
+if (!dir.exists(visualize_dir)) {dir.create(visualize_dir)} # create folder if it doesn't exist yet...
+ggsave(file.path(visualize_dir, "03_mad_indiv_differences.png"), plot = sub_slopes_final_plot, width = 25, height = 20, units = "cm", dpi = 300, bg = "white")
 ```
 
-# Evaluate model performance using predicted/observed plot 
-```{r}
-
-
-
-
-
-
-
-```
 
 
 
