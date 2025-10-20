@@ -1,3 +1,4 @@
 *.Rmd linguist-language=R
 *.rmarkdown linguist-language=R
 *.qmd linguist-language=R
+*.rmd linguist-language=R
