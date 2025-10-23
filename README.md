@@ -2,7 +2,7 @@
 ## Summary
 In everyday life, we are constantly faced with conflicting choices. Although some research has investigated how such decisions are made, it remains unknown how dynamic processes that arise during complex decisions shapes our memory for these choices later on.
 
-## Task Overview
+## Project Overview
 In this project, participants saw an item and decided whether it satisfied one of two possible goals (a hiking trip or a beach vacation). In the 'Unique' (low complexity) scenario, an item could satisfy only one goal (e.g., trekking poles for a hiking trip), while in the 'Competing' (high complexity) scenario, an item could satisfy either goal (e.g., water bottle for a hiking trip OR a beach vacation). We then tracked their mouse movement to understand how decisional conflict influenced their subsequent memory for these objects. 
 
 ## Highlights 
