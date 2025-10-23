@@ -6,14 +6,14 @@ In everyday life, we are constantly faced with conflicting choices. Although som
 In this project, participants saw an item and decided whether it satisfied one of two possible goals (a hiking trip or a beach vacation). In the 'Unique' (low complexity) scenario, an item could satisfy only one goal (e.g., trekking poles for a hiking trip), while in the 'Competing' (high complexity) scenario, an item could satisfy either goal (e.g., water bottle for a hiking trip OR a beach vacation). We then tracked their mouse movement to understand how decisional conflict influenced their subsequent memory for these objects. 
 
 ## Highlights 
-#### Raw mousetracking trajectories for low vs. high complexity decisions 
-![Raw mousetracking trajectories across decision types](visualizations/01_sample_trajectories.png)
+### → Raw mousetracking trajectories for low vs. high complexity decisions 
+<img src="visualizations/01_sample_trajectories.png" alt="Raw mousetracking trajectories across decision types" width="750">
 
-#### Response competition evolves over decision time course
-![Response competition over time](visualizations/06_cumulative_dev_combined.png)
+### → Response competition evolves over decision time course
+<img src="visualizations/06_cumulative_dev_combined.png" alt="Response competition over time" width="750">
 
-#### Decisional conflict boosts memory for low performers 
-![Individual differences in decisional conflict](visualizations/03_mad_indiv_differences.png)
+### → Decisional conflict boosts memory for low performers 
+<img src="visualizations/03_mad_indiv_differences.png" alt="Individual differences in decisional conflict" width="750">
 
 ## Repository structure
 *Data*    
